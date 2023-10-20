@@ -1,0 +1,16 @@
+[package]
+name = "propose-xcm"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alex Sedighi <alex@nodle.come>"]
+
+[dependencies]
+subxt = "0.32.1"
+subxt-signer = { version = "0.32.1", features = ["subxt"] }
+
+tokio = { version = "1.28.2", features = ["rt-multi-thread", "macros", "time"] }
+futures = "0.3.17"
+
+codec = { package = "parity-scale-codec", version = "3.5.0", default-features = false, features = ["derive", "full", "bit-vec"] }
+
+hex = "0.4.3"
