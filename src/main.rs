@@ -1,5 +1,19 @@
+use clap::Parser;
 use subxt::{OnlineClient, PolkadotConfig};
 use subxt_signer::sr25519::dev;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Parachain RPC endpoint
+    #[arg(short, long, default_value = "ws://localhost:9280")]
+    url: String,
+
+    /// A string containing a native transaction on Relaychain encoded in hex,
+    /// Example: "4603ea070000d0070000" for registering swap between para 2026 and para 2000
+    #[arg(short, long)]
+    transact: String,
+}
 
 #[subxt::subxt(runtime_metadata_path = "eden.scale")]
 pub mod eden {}
@@ -38,7 +52,9 @@ fn build_fee_asset(amount: u128) -> MultiAsset {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9280").await?;
+    let args = Args::parse();
+
+    let api = OnlineClient::<PolkadotConfig>::from_url(args.url).await?;
     println!("Connection Established");
 
     let fee_limit = 1000000000000000000;
@@ -50,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         weight_limit: WeightLimit::Unlimited,
     };
 
-    let register_swap_between_para_2026_and_para_2000 = hex::decode("4603ea070000d0070000")?;
+    let native_transact = hex::decode(args.transact)?;
     let transact = Transact {
         origin_kind: OriginKind::Native,
         require_weight_at_most: Weight {
@@ -58,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             proof_size: 1000000,
         },
         call: DoubleEncoded {
-            encoded: register_swap_between_para_2026_and_para_2000,
+            encoded: native_transact,
         },
     };
 
