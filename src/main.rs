@@ -163,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let seed = match args.signer {
         Some(s) => s,
-        None => rpassword::prompt_password("Enter your seed: ")?,
+        None => rpassword::prompt_password("Enter your secret URI: ")?,
     };
     let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&seed)?)?;
     let events = api
