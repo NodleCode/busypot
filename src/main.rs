@@ -10,12 +10,41 @@ struct Args {
     #[arg(short, long, default_value = "ws://localhost:9280")]
     url: String,
 
-    /// A string containing a native transaction on Relaychain encoded in hex,
+    /// A string containing a native transaction on Relaychain encoded in hex.
+    ///
     /// Example: "4603ea070000d0070000" for registering swap between para 2026 and para 2000
     #[arg(short, long)]
     transact: String,
 
     /// The secret uri to the private key for the signer of the transactions.
+    ///
+    /// Here is the expected format for the secret uri:
+    ///
+    /// phrase/path0/path1///password
+    ///
+    /// 111111 22222 22222   33333333
+    ///
+    /// Where:
+    ///
+    /// 1s denotes a phrase or hex string. If this is not provided, the DEV_PHRASE is used instead.
+    ///
+    /// 2s denote optional "derivation junctions" which are used to derive keys. Each of these is
+    /// separated by "/". A derivation junction beginning with "/" (ie "//" in the original string)
+    /// is a "hard" path.
+    ///
+    /// 3s denotes an optional password which is used in conjunction with the phrase provided in 1
+    /// to generate an initial key. If hex is provided for 1, it's ignored.
+    ///
+    /// Notes:
+    ///
+    /// If 1 is a 0x prefixed 64-digit hex string, then we'll interpret it as hex, and treat the hex
+    /// bytes as a seed/MiniSecretKey directly, ignoring any password.
+    ///
+    /// Else if the phrase part is a valid BIP-39 phrase, we'll use the phrase (and password, if
+    /// provided) to generate a seed/MiniSecretKey.
+    ///
+    /// Uris like "//Alice" correspond to keys derived from a DEV_PHRASE, since no phrase part is
+    /// given.
     #[arg(short, long, default_value = "//Alice")]
     signer: String,
 }
