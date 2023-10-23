@@ -155,10 +155,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         call: send_xcm_call.into(),
     });
 
+    let members_query = eden::storage().technical_membership().members();
+    let members = api.storage().at_latest().await?.fetch(&members_query).await?.unwrap();
+    let threshold = members.0.len() / 2 + 1;
+    println!("using tech committee threshold: {}", threshold);
+
     let technical_committee =
         eden::tx()
             .technical_committee()
-            .propose(1, technical_committee_call, 100);
+            .propose(threshold as u32, technical_committee_call, 100);
 
     let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
     let events = api
