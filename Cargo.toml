@@ -16,3 +16,4 @@ codec = { package = "parity-scale-codec", version = "3.5.0", default-features = 
 hex = "0.4.3"
 
 clap = { version = "4.4.6", features = ["derive"] }
+rpassword = "7.2.0"

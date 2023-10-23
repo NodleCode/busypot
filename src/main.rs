@@ -16,7 +16,8 @@ struct Args {
     #[arg(short, long)]
     transact: String,
 
-    /// The secret uri to the private key for the signer of the transactions.
+    /// The secret uri to the private key for the signer of the transactions. If not provided,
+    /// you will be prompted to securely enter the seed manually.
     ///
     /// Here is the expected format for the secret uri:
     ///
@@ -45,8 +46,8 @@ struct Args {
     ///
     /// Uris like "//Alice" correspond to keys derived from a DEV_PHRASE, since no phrase part is
     /// given.
-    #[arg(short, long, default_value = "//Alice")]
-    signer: String,
+    #[arg(short, long)]
+    signer: Option<String>,
 
     /// The maixmum number of tokens we are willing to spend on fees.
     ///
@@ -160,7 +161,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .technical_committee()
             .propose(1, technical_committee_call, 100);
 
-    let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
+    let seed = match args.signer {
+        Some(s) => s,
+        None => rpassword::prompt_password("Enter your seed: ")?,
+    };
+    let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&seed)?)?;
     let events = api
         .tx()
         .sign_and_submit_then_watch_default(&technical_committee, &from)
