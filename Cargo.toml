@@ -10,9 +10,16 @@ subxt-signer = { version = "0.32.1", features = ["subxt"] }
 
 tokio = { version = "1.28.2", features = ["rt-multi-thread", "macros", "time"] }
 futures = "0.3.17"
+async-std = "1.12.0"
 
 codec = { package = "parity-scale-codec", version = "3.5.0", default-features = false, features = ["derive", "full", "bit-vec"] }
 
 hex = "0.4.3"
 
 clap = { version = "4.4.6", features = ["derive"] }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+scrypt = "0.11.0"
+sodiumoxide = "0.2.7"
