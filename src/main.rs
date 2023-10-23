@@ -1,4 +1,5 @@
 use clap::Parser;
+use codec::Encode;
 use std::str::FromStr;
 use subxt::{OnlineClient, PolkadotConfig};
 use subxt_signer::{sr25519, SecretUri};
@@ -161,14 +162,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let members_query = eden::storage().technical_membership().members();
-    let members = api.storage().at_latest().await?.fetch(&members_query).await?.unwrap();
+    let members = api
+        .storage()
+        .at_latest()
+        .await?
+        .fetch(&members_query)
+        .await?
+        .unwrap();
     let threshold = members.0.len() / 2 + 1;
     println!("using tech committee threshold: {}", threshold);
 
-    let technical_committee =
-        eden::tx()
-            .technical_committee()
-            .propose(threshold as u32, technical_committee_call, 100);
+    let length_bound = technical_committee_call.encoded_size() as u32;
+
+    let technical_committee = eden::tx().technical_committee().propose(
+        threshold as u32,
+        technical_committee_call,
+        length_bound,
+    );
 
     if args.dry_run {
         let mocked = api.tx().call_data(&technical_committee)?;
