@@ -1,6 +1,7 @@
 use clap::Parser;
+use std::str::FromStr;
 use subxt::{OnlineClient, PolkadotConfig};
-use subxt_signer::sr25519::dev;
+use subxt_signer::{sr25519, SecretUri};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -13,6 +14,10 @@ struct Args {
     /// Example: "4603ea070000d0070000" for registering swap between para 2026 and para 2000
     #[arg(short, long)]
     transact: String,
+
+    /// The secret uri to the private key for the signer of the transactions.
+    #[arg(short, long, default_value = "//Alice")]
+    signer: String,
 }
 
 #[subxt::subxt(runtime_metadata_path = "eden.scale")]
@@ -115,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .technical_committee()
             .propose(1, technical_committee_call, 100);
 
-    let from = dev::alice();
+    let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
     let events = api
         .tx()
         .sign_and_submit_then_watch_default(&technical_committee, &from)
