@@ -1,6 +1,11 @@
+use async_std::fs::read_to_string;
 use clap::Parser;
+use serde_json;
 use subxt::{OnlineClient, PolkadotConfig};
-use subxt_signer::sr25519::dev;
+use subxt_signer::sr25519;
+
+mod decrypt_key;
+mod json_key;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -13,6 +18,15 @@ struct Args {
     /// Example: "4603ea070000d0070000" for registering swap between para 2026 and para 2000
     #[arg(short, long)]
     transact: String,
+
+    /// Path to the json file for your account data including the signer key. When this is not
+    /// specified then Alice account will be used as the signer
+    #[arg(short, long, default_value = "")]
+    json_key_path: String,
+
+    /// Password for the json key file
+    #[arg(short, long, default_value = "")]
+    password: String,
 }
 
 #[subxt::subxt(runtime_metadata_path = "eden.scale")]
@@ -115,7 +129,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .technical_committee()
             .propose(1, technical_committee_call, 100);
 
-    let from = dev::alice();
+    let from = if args.json_key_path.is_empty() {
+        sr25519::dev::alice()
+    } else {
+        let json_key = read_to_string(args.json_key_path).await?;
+        let account_data: json_key::AccountData = serde_json::from_str(&json_key)?;
+        let private_key = decrypt_key::decrypt(
+            account_data.encoded.into_bytes().as_slice(),
+            args.password.as_str(),
+        )?;
+        let seed = sr25519::Seed::try_from(private_key.as_slice())?;
+        sr25519::Keypair::from_seed(seed)?
+    };
+
     let events = api
         .tx()
         .sign_and_submit_then_watch_default(&technical_committee, &from)
