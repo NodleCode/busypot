@@ -16,6 +16,11 @@ struct Args {
     #[arg(short, long)]
     transact: String,
 
+    /// "Dry Run" the proposal. This will output the proposal to be sent to the chain without
+    /// actually doing so.
+    #[arg(short, long)]
+    dry_run: bool,
+
     /// The secret uri to the private key for the signer of the transactions.
     ///
     /// Here is the expected format for the secret uri:
@@ -98,7 +103,7 @@ fn build_fee_asset(amount: u128) -> MultiAsset {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let api = OnlineClient::<PolkadotConfig>::from_url(args.url).await?;
+    let api = OnlineClient::<PolkadotConfig>::from_url(args.url.clone()).await?;
     println!("Connection Established");
 
     let fee_limit = (args.fee_limit * DOT_DECIMALS as f32) as u128;
@@ -160,14 +165,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .technical_committee()
             .propose(1, technical_committee_call, 100);
 
-    let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
-    let events = api
-        .tx()
-        .sign_and_submit_then_watch_default(&technical_committee, &from)
-        .await?
-        .wait_for_finalized_success()
-        .await?;
+    if args.dry_run {
+        let mocked = api.tx().call_data(&technical_committee)?;
+        let mocked = format!("0x{}", hex::encode(mocked));
 
-    println!("events: {events:?}");
+        println!("final extrinsic: {}", mocked);
+        println!(
+            "shortlink: https://nodleprotocol.io/?rpc={}#/extrinsics/decode/{}",
+            urlencoding::encode(&args.url),
+            mocked
+        );
+    } else {
+        let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
+        let events = api
+            .tx()
+            .sign_and_submit_then_watch_default(&technical_committee, &from)
+            .await?
+            .wait_for_finalized_success()
+            .await?;
+
+        println!("events: {events:?}");
+    }
+
     Ok(())
 }
