@@ -47,6 +47,14 @@ struct Args {
     /// given.
     #[arg(short, long, default_value = "//Alice")]
     signer: String,
+
+    /// The maixmum number of tokens we are willing to spend on fees.
+    ///
+    /// This is a float number, and is interpreted as the number of tokens in the highest
+    /// denomination. For example, if the token has 18 decimals, then the default value of 1 means
+    /// 1 token.
+    #[arg(short, long, default_value = "1")]
+    fee_limit: f32,
 }
 
 #[subxt::subxt(runtime_metadata_path = "eden.scale")]
@@ -74,6 +82,8 @@ use eden::runtime_types::{
     },
 };
 
+const DOT_DECIMALS: u128 = 10_000_000_000; // 10 decimals
+
 fn build_fee_asset(amount: u128) -> MultiAsset {
     MultiAsset {
         id: AssetId::Concrete(MultiLocation {
@@ -91,7 +101,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api = OnlineClient::<PolkadotConfig>::from_url(args.url).await?;
     println!("Connection Established");
 
-    let fee_limit = 1000000000000000000;
+    let fee_limit = (args.fee_limit * DOT_DECIMALS as f32) as u128;
+    println!("fee_limit set to: {}", fee_limit);
 
     let withdraw_asset = WithdrawAsset(MultiAssets(vec![build_fee_asset(fee_limit)]));
 
