@@ -1,26 +1,49 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use codec::Encode;
+use std::collections::VecDeque;
 use std::str::FromStr;
-use subxt::{OnlineClient, PolkadotConfig};
+use subxt::{
+    backend::{legacy::LegacyRpcMethods, rpc::RpcClient},
+    OnlineClient, PolkadotConfig,
+};
 use subxt_signer::{sr25519, SecretUri};
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    #[command(arg_required_else_help = true)]
+    ProposeXcm {
+        /// A string containing a native transaction on relay-chain encoded in hex.
+        ///
+        /// Example: "4603ea070000d0070000" for registering swap between para 2026 and para 2000
+        #[arg(short, long)]
+        transact: String,
+        /// "Dry Run" the proposal. This will output the proposal to be sent to the chain without
+        /// actually doing so.
+        #[arg(short, long)]
+        dry_run: bool,
+        /// The maximum number of tokens we are willing to spend on fees.
+        ///
+        /// This is a float number, and is interpreted as the number of tokens in the highest
+        /// denomination. For example, if the token has 18 decimals, then the default value of 1 means
+        /// 1 token.
+        #[arg(short, long, default_value = "1")]
+        fee_limit: f32,
+    },
+    TestSponsorship {
+        /// The number of pots to create.
+        #[arg(long, default_value_t = 0)]
+        pots: usize,
+    },
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Parachain RPC endpoint
+    /// Parachain RPC endpoint. This endpoint is necessary even `dry_run` is set to true for some
+    /// commands. This is because for composing some of the transactions, there is a need to query
+    /// the chain for some information.
     #[arg(short, long, default_value = "ws://localhost:9280")]
     url: String,
-
-    /// A string containing a native transaction on Relaychain encoded in hex.
-    ///
-    /// Example: "4603ea070000d0070000" for registering swap between para 2026 and para 2000
-    #[arg(short, long)]
-    transact: String,
-
-    /// "Dry Run" the proposal. This will output the proposal to be sent to the chain without
-    /// actually doing so.
-    #[arg(short, long)]
-    dry_run: bool,
 
     /// The secret uri to the private key for the signer of the transactions.
     ///
@@ -54,13 +77,8 @@ struct Args {
     #[arg(short, long, default_value = "//Alice")]
     signer: String,
 
-    /// The maixmum number of tokens we are willing to spend on fees.
-    ///
-    /// This is a float number, and is interpreted as the number of tokens in the highest
-    /// denomination. For example, if the token has 18 decimals, then the default value of 1 means
-    /// 1 token.
-    #[arg(short, long, default_value = "1")]
-    fee_limit: f32,
+    #[command(subcommand)]
+    command: Commands,
 }
 
 #[subxt::subxt(runtime_metadata_path = "eden.scale")]
@@ -69,7 +87,7 @@ pub mod eden {}
 use eden::runtime_types::{
     pallet_mandate::pallet::Call::apply,
     pallet_xcm::pallet::Call::send,
-    runtime_eden::RuntimeCall,
+    runtime_eden::{pallets_util::SponsorshipType, RuntimeCall},
     sp_weights::weight_v2::Weight,
     xcm::{
         double_encoded::DoubleEncoded,
@@ -89,6 +107,7 @@ use eden::runtime_types::{
 };
 
 const DOT_DECIMALS: u128 = 10_000_000_000; // 10 decimals
+const NODL_DECIMALS: u128 = 100_000_000_000; // 11 decimals
 
 fn build_fee_asset(amount: u128) -> MultiAsset {
     MultiAsset {
@@ -104,103 +123,141 @@ fn build_fee_asset(amount: u128) -> MultiAsset {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let api = OnlineClient::<PolkadotConfig>::from_url(args.url.clone()).await?;
-    println!("Connection Established");
+    let rpc_client = RpcClient::from_url(args.url.clone()).await?;
+    let rpc = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client.clone());
+    let api = OnlineClient::<PolkadotConfig>::from_rpc_client(rpc_client).await?;
+    let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
 
-    let fee_limit = (args.fee_limit * DOT_DECIMALS as f32) as u128;
-    println!("fee_limit set to: {}", fee_limit);
+    let mut nonce = rpc
+        .system_account_next_index(&from.public_key().into())
+        .await?;
+    println!("Connection Established nonce = {nonce}");
 
-    let withdraw_asset = WithdrawAsset(MultiAssets(vec![build_fee_asset(fee_limit)]));
+    match args.command {
+        Commands::ProposeXcm {
+            transact,
+            dry_run,
+            fee_limit,
+        } => {
+            let fee_limit = (fee_limit * DOT_DECIMALS as f32) as u128;
+            println!("fee_limit set to: {}", fee_limit);
 
-    let buy_execution = BuyExecution {
-        fees: build_fee_asset(fee_limit),
-        weight_limit: WeightLimit::Unlimited,
+            let withdraw_asset = WithdrawAsset(MultiAssets(vec![build_fee_asset(fee_limit)]));
+
+            let buy_execution = BuyExecution {
+                fees: build_fee_asset(fee_limit),
+                weight_limit: WeightLimit::Unlimited,
+            };
+
+            let native_transact = hex::decode(transact)?;
+            let transact = Transact {
+                origin_kind: OriginKind::Native,
+                require_weight_at_most: Weight {
+                    ref_time: 10000000000,
+                    proof_size: 1000000,
+                },
+                call: DoubleEncoded {
+                    encoded: native_transact,
+                },
+            };
+
+            let refund_surplus = RefundSurplus;
+
+            let deposit_asset = DepositAsset {
+                assets: MultiAssetFilter::Wild(WildMultiAsset::All),
+                beneficiary: MultiLocation {
+                    parents: 0,
+                    interior: Junctions::X1(Junction::Parachain(2026)),
+                },
+            };
+
+            let dest = VersionedMultiLocation::V3(MultiLocation {
+                parents: 1,
+                interior: Junctions::Here,
+            });
+
+            let message = VersionedXcm::V3(Xcm(vec![
+                withdraw_asset,
+                buy_execution,
+                transact,
+                refund_surplus,
+                deposit_asset,
+            ]));
+
+            let send_xcm_call = RuntimeCall::PolkadotXcm(send {
+                message: Box::new(message),
+                dest: Box::new(dest),
+            });
+
+            let technical_committee_call = RuntimeCall::Mandate(apply {
+                call: send_xcm_call.into(),
+            });
+
+            let members_query = eden::storage().technical_membership().members();
+            let members = api
+                .storage()
+                .at_latest()
+                .await?
+                .fetch(&members_query)
+                .await?
+                .unwrap();
+            let threshold = members.0.len() / 2 + 1;
+            println!("using tech committee threshold: {}", threshold);
+
+            let length_bound = technical_committee_call.encoded_size() as u32;
+
+            let technical_committee = eden::tx().technical_committee().propose(
+                threshold as u32,
+                technical_committee_call,
+                length_bound,
+            );
+
+            if dry_run {
+                let mocked = api.tx().call_data(&technical_committee)?;
+                let mocked = format!("0x{}", hex::encode(mocked));
+
+                println!("final extrinsic: {}", mocked);
+                println!(
+                    "shortlink: https://nodleprotocol.io/?rpc={}#/extrinsics/decode/{}",
+                    urlencoding::encode(&args.url),
+                    mocked
+                );
+            } else {
+                let events = api
+                    .tx()
+                    .sign_and_submit_then_watch_default(&technical_committee, &from)
+                    .await?
+                    .wait_for_finalized_success()
+                    .await?;
+
+                println!("events: {events:?}");
+            }
+        }
+        Commands::TestSponsorship { pots } => {
+            println!("Creating {pots} pots... ");
+            let mut tx_progresses = VecDeque::new();
+            for i in 0..pots {
+                println!("Creating pot {}/{}", i, pots);
+                let create_pot = eden::tx().sponsorship().create_pot(
+                    i as u32,
+                    SponsorshipType::AnySafe,
+                    123 * NODL_DECIMALS,
+                    9 * NODL_DECIMALS,
+                );
+                let tx_progress = api
+                    .tx()
+                    .create_signed_with_nonce(&create_pot, &from, nonce, Default::default())?
+                    .submit_and_watch()
+                    .await?;
+                tx_progresses.push_back(tx_progress);
+                nonce += 1;
+            }
+            while let Some(tx_progress) = tx_progresses.pop_front() {
+                let events = tx_progress.wait_for_finalized_success().await?;
+                println!("events: {events:?}");
+            }
+        }
     };
-
-    let native_transact = hex::decode(args.transact)?;
-    let transact = Transact {
-        origin_kind: OriginKind::Native,
-        require_weight_at_most: Weight {
-            ref_time: 10000000000,
-            proof_size: 1000000,
-        },
-        call: DoubleEncoded {
-            encoded: native_transact,
-        },
-    };
-
-    let refund_surplus = RefundSurplus;
-
-    let deposit_asset = DepositAsset {
-        assets: MultiAssetFilter::Wild(WildMultiAsset::All),
-        beneficiary: MultiLocation {
-            parents: 0,
-            interior: Junctions::X1(Junction::Parachain(2026)),
-        },
-    };
-
-    let dest = VersionedMultiLocation::V3(MultiLocation {
-        parents: 1,
-        interior: Junctions::Here,
-    });
-
-    let message = VersionedXcm::V3(Xcm(vec![
-        withdraw_asset,
-        buy_execution,
-        transact,
-        refund_surplus,
-        deposit_asset,
-    ]));
-
-    let send_xcm_call = RuntimeCall::PolkadotXcm(send {
-        message: Box::new(message),
-        dest: Box::new(dest),
-    });
-
-    let technical_committee_call = RuntimeCall::Mandate(apply {
-        call: send_xcm_call.into(),
-    });
-
-    let members_query = eden::storage().technical_membership().members();
-    let members = api
-        .storage()
-        .at_latest()
-        .await?
-        .fetch(&members_query)
-        .await?
-        .unwrap();
-    let threshold = members.0.len() / 2 + 1;
-    println!("using tech committee threshold: {}", threshold);
-
-    let length_bound = technical_committee_call.encoded_size() as u32;
-
-    let technical_committee = eden::tx().technical_committee().propose(
-        threshold as u32,
-        technical_committee_call,
-        length_bound,
-    );
-
-    if args.dry_run {
-        let mocked = api.tx().call_data(&technical_committee)?;
-        let mocked = format!("0x{}", hex::encode(mocked));
-
-        println!("final extrinsic: {}", mocked);
-        println!(
-            "shortlink: https://nodleprotocol.io/?rpc={}#/extrinsics/decode/{}",
-            urlencoding::encode(&args.url),
-            mocked
-        );
-    } else {
-        let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
-        let events = api
-            .tx()
-            .sign_and_submit_then_watch_default(&technical_committee, &from)
-            .await?
-            .wait_for_finalized_success()
-            .await?;
-
-        println!("events: {events:?}");
-    }
 
     Ok(())
 }
