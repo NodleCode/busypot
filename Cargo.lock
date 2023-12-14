@@ -476,7 +476,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "busy-pot"
+name = "busypot"
 version = "0.1.1"
 dependencies = [
  "clap",

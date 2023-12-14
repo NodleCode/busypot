@@ -7,9 +7,11 @@ use subxt::{
     OnlineClient, PolkadotConfig,
 };
 use subxt_signer::{sr25519, SecretUri};
+const MAX_USERS_ONE_BLOCK: usize = 500;
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Proposes an xcm as a technical committee member for a native transaction on the relay chain
     #[command(arg_required_else_help = true)]
     ProposeXcm {
         /// A string containing a native transaction on relay-chain encoded in hex.
@@ -29,10 +31,16 @@ enum Commands {
         #[arg(short, long, default_value = "1")]
         fee_limit: f32,
     },
-    TestSponsorship {
-        /// The number of pots to create.
-        #[arg(long, default_value_t = 0)]
-        pots: usize,
+    /// Creates a number of sponsorship pots with their ids starting from 0 and incrementing
+    CreatePots { pots: usize },
+    /// Registers a number of users for the specified sponsorship pot
+    RegisterUsers {
+        /// The pot to register users in.
+        #[arg(short, long, default_value_t = 0)]
+        pot_id: u32,
+        /// The number of users to add with their addresses derived form //Alice
+        #[arg(short, long, default_value_t = 0)]
+        users: usize,
     },
 }
 
@@ -233,7 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("events: {events:?}");
             }
         }
-        Commands::TestSponsorship { pots } => {
+        Commands::CreatePots { pots } => {
             println!("Creating {pots} pots... ");
             let mut tx_progresses = VecDeque::new();
             for i in 0..pots {
@@ -253,9 +261,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 nonce += 1;
             }
             while let Some(tx_progress) = tx_progresses.pop_front() {
-                let events = tx_progress.wait_for_finalized_success().await?;
-                println!("events: {events:?}");
+                tx_progress.wait_for_finalized_success().await?;
             }
+            println!("Done!");
+        }
+        Commands::RegisterUsers { pot_id, users } => {
+            println!("Creating {users} users... ");
+            let chunked = (0..users)
+                .into_iter()
+                .collect::<Vec<_>>()
+                .chunks(MAX_USERS_ONE_BLOCK)
+                .map(|chunk| {
+                    chunk
+                        .into_iter()
+                        .filter_map(|&i| {
+                            SecretUri::from_str(format!("//Alice/{i}").as_str())
+                                .map(|s| {
+                                    sr25519::Keypair::from_uri(&s).map(|k| k.public_key().into())
+                                })
+                                .map_or(None, |r| r.ok())
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            let mut tx_progresses = VecDeque::new();
+            for chunk in chunked {
+                println!(
+                    "Registering {chunk_len} users / {users}",
+                    chunk_len = chunk.len()
+                );
+                let register_user = eden::tx().sponsorship().register_users(
+                    pot_id,
+                    chunk,
+                    43 * NODL_DECIMALS,
+                    7 * NODL_DECIMALS,
+                );
+                let tx_progress = api
+                    .tx()
+                    .create_signed_with_nonce(&register_user, &from, nonce, Default::default())?
+                    .submit_and_watch()
+                    .await?;
+                tx_progresses.push_back(tx_progress);
+                nonce += 1;
+            }
+            while let Some(tx_progress) = tx_progresses.pop_front() {
+                tx_progress.wait_for_finalized_success().await?;
+            }
+            println!("Done!");
         }
     };
 
