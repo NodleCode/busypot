@@ -32,15 +32,26 @@ enum Commands {
         fee_limit: f32,
     },
     /// Creates a number of sponsorship pots with their ids starting from 0 and incrementing
-    CreatePots { pots: usize },
+    CreatePots {
+        /// The number of pots to create.
+        #[arg(short, long, default_value_t = 1)]
+        pots: u32,
+        /// The starting id of the pots. The ids will be incremented from this value.
+        #[arg(short, long, default_value_t = 0)]
+        starting_id: u32,
+    },
     /// Registers a number of users for the specified sponsorship pot
     RegisterUsers {
         /// The pot to register users in.
         #[arg(short, long, default_value_t = 0)]
         pot_id: u32,
         /// The number of users to add with their addresses derived form //Alice
+        #[arg(short = 'n', long, default_value_t = 1)]
+        users: u32,
+        /// The starting id of the users. The ids will be incremented from this value.
+        /// The user address is dervied from //Alice/{id}
         #[arg(short, long, default_value_t = 0)]
-        users: usize,
+        starting_id: u32,
     },
 }
 
@@ -241,13 +252,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("events: {events:?}");
             }
         }
-        Commands::CreatePots { pots } => {
+        Commands::CreatePots { pots, starting_id } => {
             println!("Creating {pots} pots... ");
             let mut tx_progresses = VecDeque::new();
-            for i in 0..pots {
+            for i in starting_id..pots.saturating_add(starting_id) {
                 println!("Creating pot {}/{}", i, pots);
                 let create_pot = eden::tx().sponsorship().create_pot(
-                    i as u32,
+                    i,
                     SponsorshipType::AnySafe,
                     123 * NODL_DECIMALS,
                     9 * NODL_DECIMALS,
@@ -265,9 +276,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("Done!");
         }
-        Commands::RegisterUsers { pot_id, users } => {
-            println!("Creating {users} users... ");
-            let chunked = (0..users)
+        Commands::RegisterUsers {
+            pot_id,
+            users,
+            starting_id,
+        } => {
+            println!("Registering {users} users... ");
+            let chunked = (starting_id..users.saturating_add(starting_id))
                 .into_iter()
                 .collect::<Vec<_>>()
                 .chunks(MAX_USERS_ONE_BLOCK)
