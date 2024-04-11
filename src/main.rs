@@ -4,10 +4,12 @@ use std::collections::VecDeque;
 use std::str::FromStr;
 use subxt::{
     backend::{legacy::LegacyRpcMethods, rpc::RpcClient},
-    OnlineClient, PolkadotConfig,
+    OnlineClient,
 };
 use subxt_signer::{sr25519, SecretUri};
 const MAX_USERS_ONE_BLOCK: usize = 500;
+
+mod nodle;
 
 #[derive(Debug, Subcommand)]
 enum Commands {
@@ -143,8 +145,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let rpc_client = RpcClient::from_url(args.url.clone()).await?;
-    let rpc = LegacyRpcMethods::<PolkadotConfig>::new(rpc_client.clone());
-    let api = OnlineClient::<PolkadotConfig>::from_rpc_client(rpc_client).await?;
+    let rpc = LegacyRpcMethods::<nodle::NodleConfig>::new(rpc_client.clone());
+    let api = OnlineClient::<nodle::NodleConfig>::from_rpc_client(rpc_client).await?;
     let from = sr25519::Keypair::from_uri(&SecretUri::from_str(&args.signer)?)?;
 
     let mut nonce = rpc
@@ -263,11 +265,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     123 * NODL_DECIMALS,
                     9 * NODL_DECIMALS,
                 );
-                let tx_progress = api
-                    .tx()
-                    .create_signed_with_nonce(&create_pot, &from, nonce, Default::default())?
-                    .submit_and_watch()
-                    .await?;
+
+                let params = nodle::NodleExtrinsicParamsBuilder::default()
+                    .nonce(nonce)
+                    .build();
+                let tx = api.tx().create_signed(&create_pot, &from, params).await?;
+                let tx_progress = tx.submit_and_watch().await?;
                 tx_progresses.push_back(tx_progress);
                 nonce += 1;
             }
@@ -311,11 +314,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     43 * NODL_DECIMALS,
                     7 * NODL_DECIMALS,
                 );
-                let tx_progress = api
+
+                let params = nodle::NodleExtrinsicParamsBuilder::default()
+                    .nonce(nonce)
+                    .build();
+                let tx = api
                     .tx()
-                    .create_signed_with_nonce(&register_user, &from, nonce, Default::default())?
-                    .submit_and_watch()
+                    .create_signed(&register_user, &from, params)
                     .await?;
+                let tx_progress = tx.submit_and_watch().await?;
+
                 tx_progresses.push_back(tx_progress);
                 nonce += 1;
             }
