@@ -1,18 +1,19 @@
 [package]
 name = "busypot"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Alex Sedighi <alex@nodle.come>"]
 
 [dependencies]
-subxt = "0.33.0"
-subxt-signer = { version = "0.33.0", features = ["subxt"] }
+subxt = "0.35.2"
+subxt-signer = { version = "0.35.2", features = ["subxt"] }
 
-tokio = { version = "1.28.2", features = ["rt-multi-thread", "macros", "time"] }
-futures = "0.3.17"
+tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros", "time"] }
+futures = "0.3.30"
 
-codec = { package = "parity-scale-codec", version = "3.5.0", default-features = false, features = ["derive", "full", "bit-vec"] }
+codec = { package = "parity-scale-codec", version = "3.6.9", default-features = false, features = ["derive", "full", "bit-vec"] }
+scale-info = { version = "2.11.0", default-features = false }
 hex = "0.4.3"
 
-clap = { version = "4.4.6", features = ["derive"] }
+clap = { version = "4.5.4", features = ["derive"] }
 urlencoding = "2.1.3"
